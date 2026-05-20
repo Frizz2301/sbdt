@@ -1,0 +1,44 @@
+services:
+  mariadb-master:
+    image: mariadb:10.11
+    container_name: sbdt_mariadb_master
+    ports:
+      - "13307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: p455w0rd
+      MYSQL_REPLICATION_MODE: master
+      MYSQL_REPLICATION_USER: repl_user
+      MYSQL_REPLICATION_PASSWORD: repl_pass
+    volumes:
+      - ./db/master:/etc/mysql/conf.d
+      - ./db/data_master:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - manage-db
+
+  mariadb-slave:
+    image: mariadb:10.11
+    container_name: sbdt_mariadb_slave
+    ports:
+      - "13308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: p455w0rd
+      MYSQL_REPLICATION_MODE: slave
+      MYSQL_REPLICATION_USER: repl_user
+      MYSQL_REPLICATION_PASSWORD: repl_pass
+      MYSQL_MASTER_HOST: mariadb-master
+    volumes:
+      - ./db/slave:/etc/mysql/conf.d
+      - ./db/data_slave:/var/lib/mysql
+    depends_on:
+      - mariadb-master  
+    networks:
+      - manage-db
+
+networks:
+  manage-db:
+    driver: bridge
