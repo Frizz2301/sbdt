@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Real-Time Flight & Weather Monitoring</title>
+    
+    <!-- MENGGUNAKAN TAILWIND v3 STABIL UNTUK PRODUCTION & LIVE SERVER -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome untuk Icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet CSS untuk Maps Background -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0b1329;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            background: #f4f4f5 !important;
+        }
+        .leaflet-bar a {
+            background-color: #ffffff !important;
+            color: #1e293b !important;
+            border-bottom: 1px solid #e2e8f0 !important;
+        }
+        .leaflet-bar a:hover {
+            background-color: #14b8a6 !important;
+            color: white !important;
+        }
+        .plane-wrapper {
+            transition: transform 1s linear;
+            pointer-events: none; 
+        }
+        .plane-icon-style {
+            font-size: 22px;
+            text-shadow: 0px 2px 4px rgba(0,0,0,0.3);
+            display: inline-block;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="text-slate-200 flex flex-col h-screen w-screen">
+
+    <!-- 1. TOP NAVBAR -->
+    <header class="bg-[#1c2541] border-b border-slate-700/50 px-6 py-4 flex items-center justify-between shadow-lg z-[1000] flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-teal-500/10 text-teal-400 border border-teal-500/30">
+                <i class="fa-solid fa-satellite-dish text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-base font-bold tracking-tight text-white">Sistem Monitoring Penerbangan</h1>
+                <p class="text-xs text-slate-400">Integrasi Data Radar Cuaca & Flight Tracker (Redis Pipeline Integrated)</p>
+            </div>
+        </div>
+        
+        <!-- Status WebSocket & Info User -->
+        <div class="flex items-center gap-6 text-sm">
+            <div class="flex items-center gap-2 bg-[#0b1329] px-3 py-1.5 rounded-lg border border-slate-700">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span class="text-xs text-slate-400">WebSocket: <strong class="text-emerald-400 font-semibold">Connected</strong></span>
+            </div>
+            <div class="flex items-center gap-3 border-l border-slate-700 pl-6">
+                <div class="text-right">
+                    <p class="text-xs font-semibold text-white">Muhammad Fris Setiawan</p>
+                    <p class="text-[10px] text-teal-400 tracking-wider uppercase font-bold">Operator</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 2. MAIN LAYOUT CONTAINER -->
+    <div class="flex flex-1 h-full w-full overflow-hidden relative">
+        
+        <!-- SIDEBAR PANEL (Kiri) -->
+        <aside class="w-96 bg-[#111a36] border-r border-slate-700/50 flex flex-col z-[999] shadow-2xl h-full flex-shrink-0">
+            <!-- Ringkasan Statistik -->
+            <div class="p-4 grid grid-cols-2 gap-3 border-b border-slate-700/40">
+                <div class="bg-[#1c2541] p-3 rounded-xl border border-slate-700/50">
+                    <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Pesawat Aktif</p>
+                    <div class="flex items-baseline gap-1.5">
+                        <span class="text-2xl font-black text-white tracking-tight">10</span>
+                        <span class="text-xs text-emerald-400 font-medium"><i class="fa-solid fa-arrow-trend-up"></i> ADS-B</span>
+                    </div>
+                </div>
+                
+                <!-- INDIKATOR ARSITEKTUR TERDISTRIBUSI: REDIS DATA PIPELINE -->
+                <div class="bg-[#1c2541] p-3 rounded-xl border border-slate-700/50">
+                    <p class="text-[10px] uppercase tracking-wider text-slate-400 font-bold mb-1">Data Pipeline</p>
+                    <div class="flex items-baseline gap-1">
+                        <span class="text-xs font-black text-emerald-400 tracking-tight uppercase">Redis Pub/Sub</span>
+                        <span class="text-[9px] text-slate-400 font-semibold">Active</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- List Live Traffic Stream -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-2" id="traffic-list">
+                <h3 class="text-[11px] uppercase tracking-widest text-teal-400 font-bold mb-2">Live Traffic Registry (Subscribed)</h3>
+            </div>
+        </aside>
+
+        <!-- 3. LIVE LIGHT MAPS BACKGROUND CONTAINER -->
+        <main class="flex-1 h-full w-full relative z-0">
+            <div id="map"></div>
+        </main>
+
+        <!-- WEATHER COLOR LEGEND FLOATING -->
+        <div class="absolute bottom-6 left-[400px] bg-white/95 border border-slate-200 px-4 py-3 rounded-xl shadow-xl z-[999] text-xs text-slate-800">
+            <p class="font-bold text-slate-500 mb-2 text-[10px] uppercase tracking-wider">Skala Reflektivitas Radar (dBZ)</p>
+            <div class="flex items-center gap-0.5">
+                <span class="w-6 h-3 bg-emerald-500 rounded-l-sm"></span>
+                <span class="w-6 h-3 bg-green-600"></span>
+                <span class="w-6 h-3 bg-amber-400"></span>
+                <span class="w-6 h-3 bg-orange-500"></span>
+                <span class="w-6 h-3 bg-rose-600"></span>
+                <span class="w-6 h-3 bg-purple-600 rounded-r-sm"></span>
+            </div>
+            <div class="flex justify-between text-[9px] text-slate-400 font-mono mt-1 font-bold">
+                <span>15 dBZ</span>
+                <span>35 dBZ</span>
+                <span>>55 dBZ</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Leaflet Javascript API -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <script>
+        const map = L.map('map', {
+            zoomControl: true,
+            attributionControl: false
+        }).setView([-6.3500, 107.5000], 8);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19
+        }).addTo(map);
+
+        // ==========================================
+        //  1. ADVANCED FLUID MOVING WEATHER SIMULATION
+        // ==========================================
+        let cloudTimeFactor = 0;
+        let cloudCenter = { lat: -6.40, lng: 107.20 }; 
+
+        function generateOrganicCloudCoordinates(center, radiusX, radiusY, steps, time) {
+            let points = [];
+            for (let i = 0; i < steps; i++) {
+                let angle = (i / steps) * Math.PI * 2;
+                let distortion = 1 + Math.sin(angle * 4 + time) * 0.08 + Math.cos(angle * 3 - time * 1.5) * 0.05;
+                let currRadiusX = radiusX * distortion;
+                let currRadiusY = radiusY * distortion;
+                let lat = center.lat + currRadiusY * Math.sin(angle);
+                let lng = center.lng + currRadiusX * Math.cos(angle);
+                points.push([lat, lng]);
+            }
+            return points;
+        }
+
+        const outerCloudLayer = L.polygon([], {
+            color: '#f59e0b', fillColor: '#fbbf24', fillOpacity: 0.20, weight: 1.5, dashArray: '4, 4'
+        }).addTo(map);
+
+        const innerStormLayer = L.polygon([], {
+            color: '#dc2626', fillColor: '#ef4444', fillOpacity: 0.35, weight: 2
+        }).addTo(map).bindPopup("<b>Inti Sel Awan CB (Cumulonimbus)</b><br>Reflektivitas: 48 dBZ.");
+
+        function updateFluidWeather() {
+            cloudTimeFactor += 0.15;
+            cloudCenter.lng += 0.0006;
+            cloudCenter.lat -= 0.0001;
+
+            let outerCoords = generateOrganicCloudCoordinates(cloudCenter, 0.45, 0.30, 16, cloudTimeFactor);
+            outerCloudLayer.setLatLngs(outerCoords);
+
+            let innerCoords = generateOrganicCloudCoordinates(
+                { lat: cloudCenter.lat - 0.02, lng: cloudCenter.lng + 0.03 }, 0.22, 0.15, 12, cloudTimeFactor * 1.3
+            );
+            innerStormLayer.setLineWidth = 2;
+            innerStormLayer.setLatLngs(innerCoords);
+        }
+
+        // ==========================================
+        //   2. DATA & ARRANGEMENT 10 FLIGHT METRICS
+        // ==========================================
+        const fleetData = [
+            { id: "p1", callsign: "GIA234", type: "A333", lat: -6.12, lng: 106.60, speedLat: 0.0008, speedLng: 0.0015, heading: 60, alt: "FL320", color: "#0d9488" },
+            { id: "p2", callsign: "AWQ771", type: "A320", lat: -6.40, lng: 107.80, speedLat: 0.0007, speedLng: -0.0012, heading: 300, alt: "FL110", color: "#e11d48" },
+            { id: "p3", callsign: "LNI502", type: "B739", lat: -5.90, lng: 107.00, speedLat: -0.0005, speedLng: 0.0018, heading: 110, alt: "FL290", color: "#0284c7" },
+            { id: "p4", callsign: "CTV882", type: "A20N", lat: -6.60, lng: 106.90, speedLat: 0.0011, speedLng: 0.0009, heading: 40, alt: "FL240", color: "#16a34a" },
+            { id: "p5", callsign: "SIA978", type: "B77W", lat: -5.70, lng: 108.20, speedLat: -0.0009, speedLng: -0.0014, heading: 235, alt: "FL380", color: "#4f46e5" },
+            { id: "p6", callsign: "MAS721", type: "B738", lat: -6.25, lng: 107.90, speedLat: 0.0012, speedLng: -0.0008, heading: 325, alt: "FL340", color: "#db2777" },
+            { id: "p7", callsign: "BTK6120", type: "A320", lat: -6.00, lng: 107.40, speedLat: -0.0008, speedLng: 0.0005, heading: 150, alt: "FL190", color: "#ea580c" },
+            { id: "p8", callsign: "SJY214", type: "B735", lat: -6.50, lng: 107.60, speedLat: 0.0004, speedLng: 0.0013, heading: 70, alt: "FL150", color: "#7c3aed" },
+            { id: "p9", callsign: "GIA412", type: "B773", lat: -5.85, lng: 107.70, speedLat: -0.0006, speedLng: -0.0011, heading: 240, alt: "FL360", color: "#0d9488" },
+            { id: "p10", callsign: "AWQ551", type: "A320", lat: -6.18, lng: 107.15, speedLat: 0.0010, speedLng: 0.0010, heading: 45, alt: "FL120", color: "#e11d48" }
+        ];
+
+        const createRotatedPlaneIcon = (color, angle) => {
+            return L.divIcon({
+                html: `<div class="plane-wrapper" style="transform: rotate(${angle}deg); color: ${color};"><i class="fa-solid fa-plane plane-icon-style"></i></div>`,
+                className: 'custom-div-icon',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+        };
+
+        const trafficListContainer = document.getElementById('traffic-list');
+        
+        fleetData.forEach(plane => {
+            const card = document.createElement('div');
+            card.className = `bg-[#1c2541] p-3 rounded-xl border border-slate-700/60 border-l-4`;
+            card.style.borderColor = plane.color;
+            card.id = `card-${plane.id}`;
+            card.innerHTML = `
+                <div class="flex justify-between items-start mb-1">
+                    <div>
+                        <span class="text-sm font-bold text-white tracking-wide">${plane.callsign}</span>
+                        <span class="text-[9px] bg-slate-800 text-slate-400 px-1 py-0.5 rounded ml-1.5">${plane.type}</span>
+                    </div>
+                    <span class="text-[11px] font-mono font-bold" style="color: ${plane.color}">${plane.alt}</span>
+                </div>
+                <div class="grid grid-cols-2 text-[10px] text-slate-400 font-mono">
+                    <div>Lat: <span id="lat-${plane.id}" class="text-slate-200">-</span></div>
+                    <div>Lng: <span id="lng-${plane.id}" class="text-slate-200">-</span></div>
+                </div>
+            `;
+            trafficListContainer.appendChild(card);
+
+            plane.markerInstance = L.marker([plane.lat, plane.lng], {
+                icon: createRotatedPlaneIcon(plane.color, plane.heading)
+            }).addTo(map);
+
+            plane.markerInstance.bindPopup(`
+                <div style="font-family: monospace; font-size: 11px; color: #1e293b; padding: 2px; min-width: 140px;">
+                    <strong style="color: ${plane.color}; font-size: 12px; display: block; border-b: 1px solid #cbd5e1; padding-bottom: 2px; mb-1;">${plane.callsign} (${plane.type})</strong>
+                    <b>ALT:</b> ${plane.alt}<br>
+                    <b>HDG:</b> ${plane.heading}&deg;<br>
+                    <b>STREAM:</b> Redis Broker
+                </div>
+            `);
+        });
+
+        // ==========================================
+        //  3. CORE ENGINE TICK (1 DETIK)
+        // ==========================================
+        setInterval(() => {
+            updateFluidWeather();
+
+            fleetData.forEach(plane => {
+                plane.lat += plane.speedLat;
+                plane.lng += plane.speedLng;
+
+                plane.markerInstance.setLatLng([plane.lat, plane.lng]);
+
+                document.getElementById(`lat-${plane.id}`).innerText = plane.lat.toFixed(4);
+                document.getElementById(`lng-${plane.id}`).innerText = plane.lng.toFixed(4);
+                
+                plane.markerInstance.setPopupContent(`
+                    <div style="font-family: monospace; font-size: 11px; color: #1e293b; padding: 2px; min-width: 140px;">
+                        <strong style="color: ${plane.color}; font-size: 12px; display: block; border-b: 1px solid #cbd5e1; padding-bottom: 2px; mb-1;">${plane.callsign} (${plane.type})</strong>
+                        <b>ALT:</b> ${plane.alt}<br>
+                        <b>HDG:</b> ${plane.heading}&deg;<br>
+                        <b>LAT:</b> ${plane.lat.toFixed(4)}<br>
+                        <b>LNG:</b> ${plane.lng.toFixed(4)}
+                    </div>
+                `);
+            });
+        }, 1000); 
+
+        setTimeout(function(){ map.invalidateSize(); }, 500);
+    </script>
+</body>
+</html>
