@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Monitoring Penerbangan WebGIS SBDT",
+  "description": "Sistem Monitoring Penerbangan Real-Time ADS-B dan Radar Cuaca BMKG Berbasis Arsitektur Sistem Basis Data Terdistribusi (SBDT) pada WebGIS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
